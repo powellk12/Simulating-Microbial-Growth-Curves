@@ -1,0 +1,46 @@
+#Set a seed so that random number generation can be replicated
+set.seed(123)
+
+#Microbes demonstrate logistic growth, so let's insert the logistic growth function
+logistic <- function(t, K, r, t0) {
+  K / (1 + exp(-r * (t - t0)))
+}
+
+temps <- c(25, 30, 35)
+time_points <- seq(0, 24, by = 2)  # hours
+
+#Generate a fake dataset to work with
+growth_data <- expand.grid(Time = time_points, Temp = temps) %>%
+  mutate(
+    K = 1.0,  # carrying capacity (OD600)
+    r = case_when(
+      Temp == 25 ~ 0.20,
+      Temp == 30 ~ 0.35, # optimal growth
+      Temp == 35 ~ 0.25
+    ),
+    t0 = 8, # time to inflection, the point on the curve where the rate of change in growth begins to slow down
+    OD = logistic(Time, K, r, t0) + rnorm(n(), 0, 0.05) # add noise
+  )
+
+#Microbial growth rates depend on temperature levels, so let's fit separate logistic models for each temperature. 
+grouped_data <- group_by(growth_data, Temp)
+nested_data <- nest(grouped_data)
+nested_data$fit <- map(nested_data$data, function(df) {
+      nls(OD ~ K / (1 + exp(-r * (Time - t0))),
+          data = df,
+          start = list(K = 1, r = 0.3, t0 = 8))
+ })
+nested_data$params <- map(nested_data$fit, broom::tidy)
+fits<- unnest(nested_data, params)
+print(fits)
+
+#Ready to plot the results:
+ggplot(growth_data, aes(x = Time, y = OD, color = factor(Temp))) +
+  geom_point(size = 2) +
+  geom_smooth(method = "nls",
+              formula = y ~ K / (1 + exp(-r * (x - t0))),
+              method.args = list(start = list(K = 1, r = 0.3, t0 = 8)),
+              se = FALSE) +
+  labs(color = "Temp (°C)", y = "OD600", title = "Simulated Microbial Growth Curves") +
+  theme_minimal()
+
